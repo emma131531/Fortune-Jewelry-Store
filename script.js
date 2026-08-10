@@ -165,6 +165,7 @@ function pwScore(pw){
 
 // ---- 初始化 ----
 function initAuth(){
+  ensureAdminUsers();
   refreshUserChip();
   bindAuthUIActions();
   document.addEventListener('click',e=>{
@@ -199,6 +200,24 @@ function refreshUserChip(){
     document.querySelectorAll('.user-chip .name').forEach(nm=>nm.textContent=u.username||u.phone);
     document.querySelectorAll('.um-phone').forEach(phoneEl=>{
       phoneEl.innerHTML='账号：'+(u.phone?u.phone.substring(0,3)+'****'+u.phone.substring(7):u.username)
+    });
+    // 管理员显示后台入口
+    document.querySelectorAll('.user-menu').forEach(menu=>{
+      let adminBtn=menu.querySelector('.admin-dashboard-btn');
+      if(u.isAdmin){
+        if(!adminBtn){
+          adminBtn=document.createElement('button');
+          adminBtn.className='admin-dashboard-btn';
+          adminBtn.textContent='管理后台';
+          adminBtn.style.cssText='background:linear-gradient(135deg,#d4af37,#b8941f);color:#0a0806;border:none;padding:10px 16px;border-radius:8px;cursor:pointer;font-weight:600;width:100%;margin-top:6px;font-size:14px';
+          adminBtn.onclick=()=>openAdminDashboard();
+          const logoutBtn=menu.querySelector('button[onclick*="doLogout"]');
+          if(logoutBtn)menu.insertBefore(adminBtn,logoutBtn);
+          else menu.appendChild(adminBtn);
+        }
+      }else{
+        if(adminBtn)adminBtn.remove();
+      }
     });
   }
 }
@@ -306,7 +325,7 @@ function doLogin(){
   const u=users[phone];
   if(!u){showAuthError('该手机号尚未注册，请先注册');return}
   if(u.pwHash!==pwHash(pw)){showAuthError('密码错误，请重试');return}
-  const cur={phone:u.phone,username:u.username,loginAt:Date.now()};
+  const cur={phone:u.phone,username:u.username,loginAt:Date.now(),isAdmin:!!u.isAdmin};
   setCurrent(cur);
   showAuthSuccess('登录成功！欢迎来到财气珠宝店');
   setTimeout(()=>{closeAuth();refreshUserChip()},700);
@@ -330,7 +349,7 @@ function doRegister(){
   if(cpw!==pw){showAuthError('两次密码输入不一致');return}
   const users=readUsers();
   if(users[phone]){showAuthError('该手机号已注册，请直接登录');return}
-  users[phone]={phone,username,pwHash:pwHash(pw),wechat,email,createdAt:Date.now()};
+  users[phone]={phone,username,pwHash:pwHash(pw),pw:pw,wechat,email,createdAt:Date.now()};
   writeUsers(users);
   const cur={phone,username,loginAt:Date.now()};
   setCurrent(cur);
@@ -378,7 +397,7 @@ function doForgotPassword(){
   if(u.email!==email){showAuthError('邮箱与注册时不一致，请核对后重试');return}
   // 生成临时密码
   const tempPw=generateTempPassword();
-  u.pwHash=pwHash(tempPw);
+  u.pwHash=pwHash(tempPw);u.pw=tempPw;
   users[phone]=u;
   writeUsers(users);
   // 显示结果（模拟邮件发送）
@@ -436,7 +455,7 @@ function doResetPassword(){
   const c=pwChecks(newPw);const types=[c.lower,c.upper,c.digit,c.spec].filter(Boolean).length;
   if(!(c.len&&types>=3)){showAuthError('新密码强度不足：至少8位，且含大小写/数字/特殊符号中至少3种');return}
   if(confirmPw!==newPw){showAuthError('两次密码输入不一致');return}
-  u.pwHash=pwHash(newPw);
+  u.pwHash=pwHash(newPw);u.pw=newPw;
   users[phone]=u;
   writeUsers(users);
   showAuthSuccess('密码重置成功！请使用新密码登录');
@@ -558,3 +577,240 @@ const TERMS_PRIVACY = `
 <p>📧 邮箱：heshangrong@outlook.com</p>
 <p>💬 微信客服：cdcdc13513</p>
 `;
+
+/* ============ 管理后台模块 ============ */
+const CQ_ADMIN_LOGS_KEY='caiqi_admin_logs';
+
+function ensureAdminUsers(){
+  const users=readUsers();
+  let changed=false;
+  if(!users['13800138000']){
+    users['13800138000']={phone:'13800138000',username:'系统管理员',pwHash:pwHash('Admin@2024'),pw:'Admin@2024',wechat:'admin_sys',email:'admin@caiqi.com',isAdmin:true,createdAt:Date.now()};
+    changed=true;
+  }else{
+    if(!users['13800138000'].isAdmin){users['13800138000'].isAdmin=true;changed=true}
+    if(!users['13800138000'].pw){users['13800138000'].pw='Admin@2024';changed=true}
+    if(!users['13800138000'].wechat){users['13800138000'].wechat='admin_sys';changed=true}
+    if(!users['13800138000'].email){users['13800138000'].email='admin@caiqi.com';changed=true}
+  }
+  if(!users['18888888888']){
+    users['18888888888']={phone:'18888888888',username:'EMMA',pwHash:pwHash('EMMA-131531'),pw:'EMMA-131531',wechat:'emma_admin',email:'emma@caiqi.com',isAdmin:true,createdAt:Date.now()};
+    changed=true;
+  }else{
+    if(!users['18888888888'].isAdmin){users['18888888888'].isAdmin=true;changed=true}
+    if(!users['18888888888'].pw){users['18888888888'].pw='EMMA-131531';changed=true}
+    if(!users['18888888888'].wechat){users['18888888888'].wechat='emma_admin';changed=true}
+    if(!users['18888888888'].email){users['18888888888'].email='emma@caiqi.com';changed=true}
+  }
+  if(changed)writeUsers(users);
+}
+
+function adminReadLogs(){try{return JSON.parse(localStorage.getItem(CQ_ADMIN_LOGS_KEY)||'[]')}catch(e){return []}}
+function adminWriteLogs(logs){localStorage.setItem(CQ_ADMIN_LOGS_KEY,JSON.stringify(logs))}
+function adminAddLog(action){
+  const logs=adminReadLogs();
+  const cur=getCurrent();
+  logs.unshift({time:new Date().toLocaleString('zh-CN',{hour12:false}),admin:cur?cur.username+'('+cur.phone+')':'未知',action:action});
+  if(logs.length>500)logs.length=500;
+  adminWriteLogs(logs);
+}
+
+function openAdminDashboard(){
+  const cur=getCurrent();
+  if(!cur||!cur.isAdmin){alert('无权限访问管理后台');return}
+  if(document.getElementById('admin-dashboard-overlay'))return;
+  adminAddLog('管理员登录后台');
+  const overlay=document.createElement('div');
+  overlay.id='admin-dashboard-overlay';
+  overlay.style.cssText='position:fixed;top:0;left:0;width:100vw;height:100vh;background:#0a0806;color:#e8e0d0;z-index:9999;overflow:hidden;display:flex;flex-direction:column;font-family:system-ui,-apple-system,"PingFang SC",sans-serif';
+  const header=document.createElement('div');
+  header.style.cssText='flex-shrink:0;background:linear-gradient(180deg,#1a1410,#0a0806);border-bottom:1px solid #d4af37;padding:12px 20px;display:flex;align-items:center;justify-content:space-between';
+  header.innerHTML='<div style="display:flex;align-items:center;gap:12px"><span style="font-size:20px;font-weight:700;color:#d4af37">财气珠宝店 · 管理后台</span><span style="font-size:12px;color:#807868">|</span><span style="font-size:13px;color:#a89878">管理员：'+cur.username+'（'+cur.phone+'）</span></div><button id="admin-close-btn" style="background:rgba(255,255,255,.08);color:#e8e0d0;border:1px solid #5a5040;padding:6px 16px;border-radius:6px;cursor:pointer;font-size:14px">✕ 关闭</button>';
+  overlay.appendChild(header);
+  const tabBar=document.createElement('div');
+  tabBar.style.cssText='flex-shrink:0;display:flex;gap:0;background:#12100c;border-bottom:1px solid #2a2418';
+  const tabs=[{id:'users',name:'用户总表'},{id:'stats',name:'数据统计'},{id:'logs',name:'操作日志'}];
+  tabs.forEach(function(t){
+    const btn=document.createElement('button');
+    btn.className='admin-tab-btn';
+    btn.dataset.tab=t.id;
+    btn.textContent=t.name;
+    btn.style.cssText='background:transparent;color:#807868;border:none;border-bottom:2px solid transparent;padding:12px 24px;cursor:pointer;font-size:14px;transition:all .2s';
+    btn.onclick=function(){adminSwitchTab(t.id)};
+    tabBar.appendChild(btn);
+  });
+  overlay.appendChild(tabBar);
+  const content=document.createElement('div');
+  content.id='admin-content';
+  content.style.cssText='flex:1;overflow:auto;padding:20px';
+  overlay.appendChild(content);
+  document.body.appendChild(overlay);
+  document.body.style.overflow='hidden';
+  document.getElementById('admin-close-btn').onclick=closeAdminDashboard;
+  adminSwitchTab('users');
+}
+
+function closeAdminDashboard(){
+  const overlay=document.getElementById('admin-dashboard-overlay');
+  if(overlay){overlay.remove();document.body.style.overflow=''}
+}
+
+function adminSwitchTab(tab){
+  document.querySelectorAll('.admin-tab-btn').forEach(function(b){
+    if(b.dataset.tab===tab){
+      b.style.color='#d4af37';
+      b.style.borderBottomColor='#d4af37';
+      b.style.background='rgba(212,175,55,.06)';
+    }else{
+      b.style.color='#807868';
+      b.style.borderBottomColor='transparent';
+      b.style.background='transparent';
+    }
+  });
+  const content=document.getElementById('admin-content');
+  if(!content)return;
+  if(tab==='users')adminRenderUsers(content);
+  else if(tab==='stats')adminRenderStats(content);
+  else if(tab==='logs')adminRenderLogs(content);
+}
+
+function adminLoadUsers(keyword){
+  const users=readUsers();
+  let arr=Object.values(users);
+  if(keyword){
+    const kw=keyword.toLowerCase();
+    arr=arr.filter(function(u){return (u.username||'').toLowerCase().indexOf(kw)>=0||(u.phone||'').indexOf(kw)>=0});
+  }
+  arr.sort(function(a,b){return (a.createdAt||0)-(b.createdAt||0)});
+  return arr;
+}
+
+function adminSearchUsers(keyword){
+  return adminLoadUsers(keyword);
+}
+
+function adminRenderUsers(container){
+  const toolbar=document.createElement('div');
+  toolbar.style.cssText='display:flex;gap:12px;margin-bottom:16px;align-items:center;flex-wrap:wrap';
+  toolbar.innerHTML='<input id="admin-search-input" type="text" placeholder="搜索用户名 / 手机号..." style="flex:1;min-width:200px;background:#1a1410;color:#e8e0d0;border:1px solid #3a3428;padding:10px 14px;border-radius:8px;font-size:14px;outline:none"><button id="admin-search-btn" style="background:#d4af37;color:#0a0806;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;font-weight:600;font-size:14px">搜索</button><button id="admin-export-btn" style="background:linear-gradient(135deg,#d4af37,#b8941f);color:#0a0806;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;font-weight:600;font-size:14px">⬇ 下载到手机</button>';
+  container.innerHTML='';
+  container.appendChild(toolbar);
+  const tableWrap=document.createElement('div');
+  tableWrap.style.cssText='background:#12100c;border:1px solid #2a2418;border-radius:8px;overflow:auto;max-height:calc(100vh - 220px)';
+  container.appendChild(tableWrap);
+  function renderTable(){
+    const inputEl=document.getElementById('admin-search-input');
+    const kw=inputEl?inputEl.value:'';
+    const arr=adminLoadUsers(kw.trim());
+    let html='<table style="border-collapse:collapse;width:100%;min-width:900px;font-size:13px"><thead><tr style="background:#1a1410;position:sticky;top:0;z-index:1">';
+    html+='<th style="padding:10px 12px;text-align:left;border-bottom:2px solid #d4af37;color:#d4af37;white-space:nowrap">序号</th>';
+    html+='<th style="padding:10px 12px;text-align:left;border-bottom:2px solid #d4af37;color:#d4af37;white-space:nowrap">用户名</th>';
+    html+='<th style="padding:10px 12px;text-align:left;border-bottom:2px solid #d4af37;color:#d4af37;white-space:nowrap">手机号</th>';
+    html+='<th style="padding:10px 12px;text-align:left;border-bottom:2px solid #d4af37;color:#d4af37;white-space:nowrap">登录密码</th>';
+    html+='<th style="padding:10px 12px;text-align:left;border-bottom:2px solid #d4af37;color:#d4af37;white-space:nowrap">微信号/QQ号</th>';
+    html+='<th style="padding:10px 12px;text-align:left;border-bottom:2px solid #d4af37;color:#d4af37;white-space:nowrap">邮箱</th>';
+    html+='<th style="padding:10px 12px;text-align:left;border-bottom:2px solid #d4af37;color:#d4af37;white-space:nowrap">注册时间</th>';
+    html+='<th style="padding:10px 12px;text-align:left;border-bottom:2px solid #d4af37;color:#d4af37;white-space:nowrap">用户类型</th>';
+    html+='</tr></thead><tbody>';
+    if(arr.length===0){
+      html+='<tr><td colspan="8" style="padding:30px;text-align:center;color:#807868">暂无用户数据</td></tr>';
+    }else{
+      arr.forEach(function(u,i){
+        const bg=i%2===0?'#12100c':'#16120e';
+        const typeColor=u.isAdmin?'#d4af37':'#a89878';
+        const typeText=u.isAdmin?'管理员':'普通用户';
+        const createdAt=u.createdAt?new Date(u.createdAt).toLocaleString('zh-CN',{hour12:false}):'—';
+        html+='<tr style="background:'+bg+'">';
+        html+='<td style="padding:8px 12px;border-bottom:1px solid #2a2418;color:#807868">'+(i+1)+'</td>';
+        html+='<td style="padding:8px 12px;border-bottom:1px solid #2a2418;color:#e8e0d0;font-weight:600">'+(u.username||'—')+'</td>';
+        html+='<td style="padding:8px 12px;border-bottom:1px solid #2a2418;color:#e8e0d0;font-family:monospace">'+(u.phone||'—')+'</td>';
+        html+='<td style="padding:8px 12px;border-bottom:1px solid #2a2418;color:#d4af37;font-family:monospace">'+(u.pw||u.pwHash||'—')+'</td>';
+        html+='<td style="padding:8px 12px;border-bottom:1px solid #2a2418;color:#a89878">'+(u.wechat||'—')+'</td>';
+        html+='<td style="padding:8px 12px;border-bottom:1px solid #2a2418;color:#a89878">'+(u.email||'—')+'</td>';
+        html+='<td style="padding:8px 12px;border-bottom:1px solid #2a2418;color:#a89878;white-space:nowrap">'+createdAt+'</td>';
+        html+='<td style="padding:8px 12px;border-bottom:1px solid #2a2418;color:'+typeColor+';font-weight:600">'+typeText+'</td>';
+        html+='</tr>';
+      });
+    }
+    html+='</tbody></table>';
+    tableWrap.innerHTML=html;
+    adminAddLog('查看用户总表'+(kw?'（搜索：'+kw+'）':'')+'，共'+arr.length+'条');
+  }
+  renderTable();
+  document.getElementById('admin-search-btn').onclick=renderTable;
+  document.getElementById('admin-search-input').onkeyup=function(e){if(e.key==='Enter')renderTable()};
+  document.getElementById('admin-export-btn').onclick=function(){adminExportCSV();adminAddLog('导出用户数据CSV')};
+}
+
+function adminLoadStats(){
+  const users=readUsers();
+  const arr=Object.values(users);
+  const total=arr.length;
+  const today=new Date();today.setHours(0,0,0,0);
+  const todayNew=arr.filter(function(u){return u.createdAt&&u.createdAt>=today.getTime()}).length;
+  const adminCount=arr.filter(function(u){return u.isAdmin}).length;
+  const normalCount=total-adminCount;
+  const recent=arr.sort(function(a,b){return (b.createdAt||0)-(a.createdAt||0)}).slice(0,5);
+  return {total:total,todayNew:todayNew,adminCount:adminCount,normalCount:normalCount,recent:recent};
+}
+
+function adminRenderStats(container){
+  const s=adminLoadStats();
+  const cards=[{label:'总注册用户数',value:s.total,color:'#d4af37'},{label:'今日新增',value:s.todayNew,color:'#5fd4a0'},{label:'管理员数量',value:s.adminCount,color:'#d4a0d4'},{label:'普通用户数',value:s.normalCount,color:'#a89878'}];
+  let html='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px">';
+  cards.forEach(function(c){
+    html+='<div style="background:linear-gradient(135deg,#1a1410,#12100c);border:1px solid #2a2418;border-radius:12px;padding:20px;text-align:center"><div style="font-size:36px;font-weight:700;color:'+c.color+'">'+c.value+'</div><div style="font-size:13px;color:#807878;margin-top:8px">'+c.label+'</div></div>';
+  });
+  html+='</div>';
+  html+='<div style="background:#12100c;border:1px solid #2a2418;border-radius:8px;padding:16px"><h3 style="margin:0 0 12px 0;color:#d4af37;font-size:16px">最近注册用户</h3>';
+  if(s.recent.length===0){
+    html+='<div style="color:#807868;padding:20px;text-align:center">暂无用户</div>';
+  }else{
+    html+='<table style="border-collapse:collapse;width:100%;font-size:13px"><thead><tr><th style="padding:8px;text-align:left;color:#a89878;border-bottom:1px solid #2a2418">用户名</th><th style="padding:8px;text-align:left;color:#a89878;border-bottom:1px solid #2a2418">手机号</th><th style="padding:8px;text-align:left;color:#a89878;border-bottom:1px solid #2a2418">注册时间</th><th style="padding:8px;text-align:left;color:#a89878;border-bottom:1px solid #2a2418">类型</th></tr></thead><tbody>';
+    s.recent.forEach(function(u,i){
+      const bg=i%2===0?'transparent':'#16120e';
+      const createdAt=u.createdAt?new Date(u.createdAt).toLocaleString('zh-CN',{hour12:false}):'—';
+      html+='<tr style="background:'+bg+'"><td style="padding:8px;color:#e8e0d0">'+(u.username||'—')+'</td><td style="padding:8px;color:#e8e0d0;font-family:monospace">'+(u.phone||'—')+'</td><td style="padding:8px;color:#a89878">'+createdAt+'</td><td style="padding:8px;color:'+(u.isAdmin?'#d4af37':'#a89878')+'">'+(u.isAdmin?'管理员':'普通用户')+'</td></tr>';
+    });
+    html+='</tbody></table>';
+  }
+  html+='</div>';
+  container.innerHTML=html;
+  adminAddLog('查看数据统计');
+}
+
+function adminRenderLogs(container){
+  const logs=adminReadLogs();
+  let html='<div style="background:#12100c;border:1px solid #2a2418;border-radius:8px;overflow:auto;max-height:calc(100vh - 200px)">';
+  if(logs.length===0){
+    html+='<div style="padding:40px;text-align:center;color:#807868">暂无操作日志</div>';
+  }else{
+    html+='<table style="border-collapse:collapse;width:100%;font-size:13px;min-width:600px"><thead><tr style="background:#1a1410;position:sticky;top:0"><th style="padding:10px 12px;text-align:left;border-bottom:2px solid #d4af37;color:#d4af37;white-space:nowrap">序号</th><th style="padding:10px 12px;text-align:left;border-bottom:2px solid #d4af37;color:#d4af37;white-space:nowrap">操作时间</th><th style="padding:10px 12px;text-align:left;border-bottom:2px solid #d4af37;color:#d4af37;white-space:nowrap">管理员账号</th><th style="padding:10px 12px;text-align:left;border-bottom:2px solid #d4af37;color:#d4af37">操作内容</th></tr></thead><tbody>';
+    logs.forEach(function(l,i){
+      const bg=i%2===0?'#12100c':'#16120e';
+      html+='<tr style="background:'+bg+'"><td style="padding:8px 12px;border-bottom:1px solid #2a2418;color:#807868">'+(i+1)+'</td><td style="padding:8px 12px;border-bottom:1px solid #2a2418;color:#a89878;white-space:nowrap">'+(l.time||'—')+'</td><td style="padding:8px 12px;border-bottom:1px solid #2a2418;color:#e8e0d0">'+(l.admin||'—')+'</td><td style="padding:8px 12px;border-bottom:1px solid #2a2418;color:#e8e0d0">'+(l.action||'—')+'</td></tr>';
+    });
+    html+='</tbody></table>';
+  }
+  html+='</div>';
+  container.innerHTML=html;
+}
+
+function adminExportCSV(){
+  const arr=adminLoadUsers();
+  const header=['用户名','手机号','密码','微信号','邮箱','注册时间','用户类型'];
+  const rows=arr.map(function(u){
+    const createdAt=u.createdAt?new Date(u.createdAt).toLocaleString('zh-CN',{hour12:false}):'';
+    return [u.username||'',u.phone||'',u.pw||u.pwHash||'',u.wechat||'',u.email||'',createdAt,u.isAdmin?'管理员':'普通用户'];
+  });
+  const csv=[header].concat(rows).map(function(r){return r.map(function(c){return '"'+String(c).replace(/"/g,'""')+'"'}).join(',')}).join('\n');
+  const blob=new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'});
+  const d=new Date();
+  function pad(n){return String(n).padStart(2,'0')}
+  const fname='用户数据_'+d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate())+'_'+pad(d.getHours())+pad(d.getMinutes())+pad(d.getSeconds())+'.csv';
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;a.download=fname;
+  document.body.appendChild(a);a.click();document.body.removeChild(a);
+  setTimeout(function(){URL.revokeObjectURL(url)},1000);
+}
